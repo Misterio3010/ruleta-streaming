@@ -1,1 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruleta de Premios - Streaming</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --success: #10b981;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f8fafc;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .container { background: var(--card-bg); width: 100%; max-width: 480px; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; position: relative; }
+        h1 { font-size: 1.5rem; margin-bottom: 20px; color: #38bdf8; }
+        .input-group { margin-bottom: 20px; }
+        input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
+        button { background: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; width: 100%; transition: background 0.2s; }
+        button:hover { background: var(--primary-dark); }
+        .hidden { display: none !important; }
+        
+        .wheel-container { position: relative; width: 260px; height: 260px; margin: 20px auto; }
+        .wheel { 
+            width: 100%; height: 100%; border-radius: 50%; border: 8px solid #38bdf8; position: relative; 
+            transition: transform 4s cubic-bezier(0.15, 0.95, 0.15, 1); 
+            background: conic-gradient(
+                #ef4444 0deg 36deg,     
+                #f59e0b 36deg 72deg,    
+                #10b981 72deg 108deg,   
+                #3b82f6 108deg 144deg,  
+                #8b5cf6 144deg 180deg,  
+                #ec4899 180deg 216deg,  
+                #14b8a6 216deg 252deg,  
+                #f97316 252deg 288deg,  
+                #06b6d4 288deg 324deg,  
+                #84cc16 324deg 360deg   
+            ); 
+        }
+        .pointer { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 25px solid #fff; z-index: 10; }
+        
+        .result-box { margin-top: 20px; padding: 15px; background: #0f172a; border-radius: 10px; border: 1px solid var(--success); }
+        .admin-link { margin-top: 25px; font-size: 0.85rem; color: #94a3b8; cursor: pointer; text-decoration: underline; }
+        .badge { display: inline-block; background: #334155; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="container" id="clientView">
+        <h1>🎁 Ruleta de la Suerte</h1>
+        <div class="badge">Gira y gana un premio por tu compra</div>
+        
+        <div id="stepLogin">
+            <div class="input-group">
+                <input type="text" id="clientCode" placeholder="Ingresa tu código de compra">
+            </div>
+            <button onclick="verificarCodigo()">Validar Código</button>
+        </div>
+
+        <div id="stepWheel" class="hidden">
+            <div class="pointer"></div>
+            <div class="wheel-container">
+                <div class="wheel" id="wheel"></div>
+            </div>
+            <button id="spinBtn" onclick="girarRuleta()">¡Girar Ruleta!</button>
+        </div>
+
+        <div id="stepResult" class="hidden">
+            <div class="result-box">
+                <h3 id="resultTitle" style="color: var(--success); margin-bottom: 10px;">¡Resultado! 🎉</h3>
+                <p id="winnerText" style="margin-bottom: 15px;"></p>
+                <button id="whatsappBtn" style="background: #25d366;" onclick="reclamarWhatsApp()">Reclamar por WhatsApp</button>
+            </div>
+        </div>
+
+        <div class="admin-link" onclick="abrirAdmin()">Acceso Administrador</div>
+    </div>
+
+    <div class="container hidden" id="adminView">
+        <h1>⚙️ Panel de Control</h1>
+        <p style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px;">Genera o revisa tus códigos de un solo uso.</p>
+        
+        <div class="input-group">
+            <input type="text" id="newCodeInput" placeholder="Ej: STREAM-01">
+            <button style="margin-top: 5px; background: #10b981;" onclick="agregarCodigo()">Agregar Código</button>
+        </div>
+
+        <div style="text-align: left; margin-top: 20px;">
+            <p style="font-size: 0.9rem; font-weight: bold; margin-bottom: 8px;">Códigos Registrados:</p>
+            <div id="codeList" style="max-height: 150px; overflow-y: auto; background: #0f172a; padding: 10px; border-radius: 8px; font-size: 0.85rem;"></div>
+        </div>
+
+        <button style="margin-top: 20px; background: #475569;" onclick="cerrarAdmin()">Volver a la Ruleta</button>
+    </div>
+
+    <script>
+        if (!localStorage.getItem('ruleta_codigos')) {
+            const initial = { "CLIENTE01": false, "CLIENTE02": false, "VIP2026": false };
+            localStorage.setItem('ruleta_codigos', JSON.stringify(initial));
+        }
+
+        let premioGanado = "";
+
+        function verificarCodigo() {
+            const codigo = document.getElementById('clientCode').value.trim().toUpperCase();
+            const codigos = JSON.parse(localStorage.getItem('ruleta_codigos'));
+
+            if (!codigo) {
+                alert("Por favor ingresa un código.");
+                return;
+            }
+
+            if (!(codigo in codigos)) {
+                alert("❌ Código inválido. Verifica el código que te dio tu vendedor.");
+                return;
+            }
+
+            if (codigos[codigo] === true) {
+                alert("⚠️ Este código ya fue utilizado anteriormente.");
+                return;
+            }
+
+            window.codigoActual = codigo;
+            document.getElementById('stepLogin').classList.add('hidden');
+            document.getElementById('stepWheel').classList.remove('hidden');
+        }
+
+        function girarRuleta() {
+            const btn = document.getElementById('spinBtn');
+            btn.disabled = true;
+            
+            const wheel = document.getElementById('wheel');
+            const premios = [
+                "Sigue intentando 😢",                
+                "Sigue intentando 😢",                
+                "Sigue intentando 😢",                
+                "Sigue intentando 😢",                
+                "Sigue intentando 😢",                
+                "¡Canva gratis por un año! 🎨",       
+                "¡Canva gratis por un año! 🎨",       
+                "¡HBO! 🎬",                          
+                "¡Prime! 📦",                         
+                "¡ViX Premium! 📺"                    
+            ];
+            
+            const randomDegree = Math.floor(Math.random() * 360) + 1800;
+            wheel.style.transform = `rotate(${randomDegree}deg)`;
+
+            setTimeout(() => {
+                const actualDegree = randomDegree % 360;
+                let index = Math.floor(actualDegree / 36);
+                index = (9 - index) % 10;
+                premioGanado = premios[index];
+
+                let codigos = JSON.parse(localStorage.getItem('ruleta_codigos'));
+                codigos[window.codigoActual] = true;
+                localStorage.setItem('ruleta_codigos', JSON.stringify(codigos));
+
+                const titleElem = document.getElementById('resultTitle');
+                const btnWhatsapp = document.getElementById('whatsappBtn');
+                
+                if (premioGanado.includes("Sigue intentando")) {
+                    titleElem.innerText = "¡Mucha suerte la próxima! 🍀";
+                    titleElem.style.color = "#f59e0b";
+                    btnWhatsapp.innerText = "Avisar al vendedor";
+                } else {
+                    titleElem.innerText = "¡Felicidades! 🎉";
+                    titleElem.style.color = "var(--success)";
+                    btnWhatsapp.innerText = "Reclamar por WhatsApp";
+                }
+
+                document.getElementById('stepWheel').classList.add('hidden');
+                document.getElementById('stepResult').classList.remove('hidden');
+                document.getElementById('winnerText').innerText = `Resultado: ${premioGanado}`;
+            }, 4000);
+        }
+
+        function reclamarWhatsApp() {
+            const tuNumeroWhatsApp = "51999999999"; // Cambia esto por tu número real de WhatsApp con código de país
+            const mensaje = `Hola! Acabo de girar la ruleta con el código (${window.codigoActual}) y obtuve: ${premioGanado}`;
+            const url = `https://wa.me/${tuNumeroWhatsApp}?text=${encodeURIComponent(mensaje)}`;
+            window.open(url, '_blank');
+        }
+
+        function abrirAdmin() {
+            const clave = prompt("Ingresa la clave de administrador:");
+            if (clave === "admin123") {
+                document.getElementById('clientView').classList.add('hidden');
+                document.getElementById('adminView').classList.remove('hidden');
+                actualizarListaAdmin();
+            } else if (clave !== null) {
+                alert("Clave incorrecta.");
+            }
+        }
+
+        function cerrarAdmin() {
+            document.getElementById('adminView').classList.add('hidden');
+            document.getElementById('clientView').classList.remove('hidden');
+            document.getElementById('clientCode').value = '';
+        }
+
+        function agregarCodigo() {
+            const nuevoCodigo = document.getElementById('newCodeInput').value.trim().toUpperCase();
+            if (!nuevoCodigo) return;
+
+            let codigos = JSON.parse(localStorage.getItem('ruleta_codigos'));
+            if (nuevoCodigo in codigos) {
+                alert("Este código ya existe.");
+                return;
+            }
+
+            codigos[nuevoCodigo] = false;
+            localStorage.setItem('ruleta_codigos', JSON.stringify(codigos));
+            document.getElementById('newCodeInput').value = '';
+            actualizarListaAdmin();
+            alert("¡Código creado con éxito!");
+        }
+
+        function actualizarListaAdmin() {
+            const codigos = JSON.parse(localStorage.getItem('ruleta_codigos'));
+            const listDiv = document.getElementById('codeList');
+            listDiv.innerHTML = "";
+
+            for (let [code, usado] of Object.entries(codigos)) {
+                const estado = usado ? "🔴 Canjeado" : "🟢 Disponible";
+                listDiv.innerHTML += `<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1e293b;">
+                    <span><b>${code}</b></span>
+                    <span>${estado}</span>
+                </div>`;
+            }
+        }
+    </script>
+</body>
+</html>
 
